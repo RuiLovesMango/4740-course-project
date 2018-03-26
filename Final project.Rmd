@@ -1,0 +1,342 @@
+---
+title: "finalproject"
+author: "Rui Chen"
+date: "November 28, 2016"
+output: pdf_document
+---
+${\bf SUMMARY}$
+1. multiple linear regression
+
+calculate VIF
+(non linear regression???)
+
+2.All subset selection 
+3.Ridge regression
+4.Lasso regression
+5.PCR
+6.GAM
+
+
+```{r}
+kidney = read.csv("Kidney_2.csv", header = TRUE)
+kidney = t(kidney)
+colnames(kidney) = kidney[1,]
+kidney= kidney[-1,]
+kidney = as.data.frame(kidney)
+
+# change from factor to numeric
+for(i in 1:dim(kidney)[2]){
+  kidney[,i] = as.numeric(levels(kidney[,i])[kidney[,i]])
+}
+
+pairs(kidney)
+
+
+```
+
+
+Split training and testing data
+```{r}
+set.seed(1)
+train = sample(1:40, 30)
+test = (-train)
+```
+
+
+
+Linear regression:
+```{r}
+library(car)
+fit.lm = lm(Mapk1~., data = kidney[train,])
+pred.lm = predict(fit.lm, newdata = kidney[test,])
+mean((pred.lm-kidney[test,]$Mapk1)^2)
+```
+
+
+we see the summary of the fit.lm, the p value of the coefficients are extremely large, thus linear regression including all covariates is not good.
+
+model selection:
+
+All subset: 
+```{r}
+library(leaps)
+regfit.full=regsubsets(Mapk1~.,kidney[train,], nvmax = 23)
+reg.summary=summary(regfit.full)
+reg.summary$rsq
+
+plot(reg.summary$rss,xlab="Number of Variables",ylab="RSS",type="l")
+plot(reg.summary$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="l")
+which.max(reg.summary$adjr2)
+points(11,reg.summary$adjr2[11], col="red",cex=2,pch=20)
+plot(reg.summary$cp,xlab="Number of Variables",ylab="Cp",type='l')
+which.min(reg.summary$cp)
+points(5,reg.summary$cp[5],col="red",cex=2,pch=20)
+which.min(reg.summary$bic)
+plot(reg.summary$bic,xlab="Number of Variables",ylab="BIC",type='l')
+points(4,reg.summary$bic[4],col="red",cex=2,pch=20)
+```
+
+By criteria of adjusted r-square, we choose model with 11 variables; by criteria of Mallow CP, we choose model with 5 variables, by criteria of BIC, we choose model with 4 variables.
+
+Because the observations and full model variables are relatively small, so I think doing all subset selection is resonable and backward/forward selection is not needed.
+
+
+12 variables: Cdc42; Pla2g6; Akt2; Plcg2; Rac2;Rik;Pla2g5;Sphk2;Map2k1;Ptk2;Nos3;Rac1;
+
+```{r}
+library(boot)
+fit.lm12=glm(Mapk1~Cdc42+Pla2g6+Akt2+Plcg2+Rac2+Rik+Pla2g5+Sphk2+Map2k1+Ptk2+Nos3+Rac1, data = kidney)
+summary(fit.lm12)
+cv.out = cv.glm(kidney, fit.lm12)
+cv.out$delta[1]
+```
+
+4 variables: Akt2; Rik; Pik3r3;Rac1
+```{r}
+fit.lm4 = glm(Mapk1~Akt2+Rik+Pik3r3+Rac1, data = kidney)
+summary(fit.lm4)
+cv.out2 = cv.glm(kidney, fit.lm4)
+cv.out2$delta[1]
+```
+
+5 variables: Akt2; Rik; Pik3r3;Pik3r1; Rac1
+```{r}
+fit.lm5 = glm(Mapk1~Akt2+Rik+Pik3r3+Pik3r1+Rac1, data = kidney)
+cv.out3 = cv.glm(kidney, fit.lm5)
+cv.out3$delta[1]
+
+```
+
+forward
+```{r}
+regfit.fwd=regsubsets(Mapk1~.,data=kidney[train,],nvmax=23,method="forward")
+fwd.summary = summary(regfit.fwd)
+plot(fwd.summary$rss,xlab="Number of Variables",ylab="RSS",type="l")
+plot(fwd.summary$adjr2,xlab="Number of Variables",ylab="Adjusted RSq",type="l")
+which.max(fwd.summary$adjr2)  #15
+
+which.min(fwd.summary$cp)#9
+which.min(fwd.summary$bic)#5
+
+subvar.15=names(which(fwd.summary$which[which.max(fwd.summary$adjr2),] == "TRUE")[-1])
+subvar.15full = c("Mapk1", subvar.15)
+```
+
+with 15 variables:
+```{r}
+fwd.lm15 = lm(Mapk1~., data = kidney[train,subvar.15full])
+pred.fwd.lm15 = predict(fwd.lm15, newdata =kidney[test,subvar.15])
+mean((pred.fwd.lm15-kidney[test,]$Mapk1)^2)
+```
+
+with 9 variables:
+```{r}
+subvar.9=names(which(fwd.summary$which[which.min(fwd.summary$cp),] == "TRUE")[-1])
+subvar.9full = c("Mapk1", subvar.9)
+
+fwd.lm9 = lm(Mapk1~., data = kidney[train, subvar.9full])
+pred.fwd.lm9 = predict(fwd.lm9, newdata =kidney[test,subvar.9])
+mean((pred.fwd.lm9-kidney[test,]$Mapk1)^2)
+```
+
+with 5 variables:
+```{r}
+
+subvar.5=names(which(fwd.summary$which[which.min(fwd.summary$bic),] == "TRUE")[-1])
+subvar.5full = c("Mapk1", subvar.5)
+fwd.lm5 = lm(Mapk1~., data = kidney[train, subvar.5full])
+pred.fwd.lm5 = predict(fwd.lm5, newdata =kidney[test,subvar.5])
+mean((pred.fwd.lm5-kidney[test,]$Mapk1)^2)
+
+mse = matrix(0, nrow = 50, ncol = 1)
+for(i in 1:50){
+  set.seed(i)
+  train = sample(1:40, 30)
+  test = (-train)
+  regfit.fwd=regsubsets(Mapk1~.,data=kidney[train,],nvmax=23,method="forward")
+  fwd.summary = summary(regfit.fwd)
+  subvar.5=names(which(fwd.summary$which[which.min(fwd.summary$bic),] == "TRUE")[-1])
+  subvar.5full = c("Mapk1", subvar.5)
+  fwd.lm5 = lm(Mapk1~., data = kidney[train, subvar.5full])
+  pred.fwd.lm5 = predict(fwd.lm5, newdata =kidney[test,subvar.5])
+  mse[i,]=mean((pred.fwd.lm5-kidney[test,]$Mapk1)^2)
+
+}
+boxplot(mse)
+
+```
+
+
+
+backward
+```{r}
+regfit.bwd=regsubsets(Mapk1~.,data=kidney,nvmax=23,method="backward")
+bwd.summary = summary(regfit.bwd)
+
+which.max(bwd.summary$adjr2)
+which.min(bwd.summary$cp)
+which.min(bwd.summary$bic)
+```
+
+with 13 variables:
+```{r}
+bwd.lm13 = glm(Mapk1~Cdc42+Pla2g6+Akt2+Plcg2+Rac2+Pla2g5+Sphk2+Map2k1+Ptk2+Nos3+Pik3ca+Ppp3cb+Rac1, data = kidney)
+cv.bwd13 = cv.glm(kidney, bwd.lm13)
+cv.bwd13$delta[1]
+```
+with 7 variables:
+```{r}
+bwd.lm7 = glm(Mapk1~Cdc42+Akt2+Plcg2+Rac2+Sphk2+Ppp3cb+Rac1, data = kidney)
+cv.bwd7 = cv.glm(kidney, bwd.lm7)
+cv.bwd7$delta[1]
+```
+
+
+
+
+Ridge:
+```{r}
+x =model.matrix(Mapk1~.,kidney[train,])[,-1]
+y = kidney[train,]$Mapk1
+library(glmnet)
+grid=10^seq(10,-2,length=100)   #create a grid for \lambda
+ridge.mod=glmnet(x,y,alpha=0,lambda=grid) #alpha=0 is the ridge penalty, alpha=1 is the lasso penalty
+set.seed(1)
+cv.out=cv.glmnet(x,y,alpha=0, nfold = 5)  # 5 fold cross validation
+bestlam.ridge=cv.out$lambda.min
+bestlam.ridge
+ridge.mod=glmnet(x,y,alpha=0,lambda=bestlam.ridge)
+xtest = model.matrix(Mapk1~., kidney[test,])[,-1]
+ytest = kidney[test,]$Mapk1
+mean((predict(ridge.mod, s = bestlam.ridge, newx = xtest)-ytest)^2)
+
+```
+
+
+Lasso:
+```{r}
+set.seed(1)
+cv.out=cv.glmnet(x,y,alpha=1, nfold = 5)  #5 fold cross validation
+bestlam.lasso=cv.out$lambda.min
+bestlam.lasso #0.004707
+lasso.mod=glmnet(x,y,alpha=1,lambda=bestlam.lasso)
+pred.lasso = predict(lasso.mod, s = bestlam.lasso, newx = xtest)
+mean((pred.lasso-ytest)^2) #0.01175695
+
+
+lasso.coef = coef(lasso.mod)
+lasso.coef[lasso.coef!=0]
+
+```
+
+
+Loop and boxplot
+```{r}
+
+ridge.err = matrix(0,nrow = 50, ncol = 1)
+lasso.err = matrix(0,nrow = 50, ncol = 1)
+for(i in 1:50){
+  set.seed(i)
+  train = sample(1:40, 30)
+  test = (-train)
+  
+  x =model.matrix(Mapk1~.,kidney[train,])[,-1]
+  y = kidney[train,]$Mapk1
+  cv.out=cv.glmnet(x,y,alpha=0, nfold = 5)  # 5 fold cross validation
+  bestlam.ridge=cv.out$lambda.min
+  ridge.mod=glmnet(x,y,alpha=0,lambda=bestlam.ridge)
+  xtest = model.matrix(Mapk1~., kidney[test,])[,-1] 
+  ytest = kidney[test,]$Mapk1
+  ridge.err[i,1] = mean((predict(ridge.mod, s = bestlam.ridge, newx = xtest)-ytest)^2)
+  
+  cv.out=cv.glmnet(x,y,alpha=1, nfold = 5)  #5 fold cross validation
+  bestlam.lasso=cv.out$lambda.min
+  bestlam.lasso 
+  lasso.mod=glmnet(x,y,alpha=1,lambda=bestlam.lasso)
+  pred.lasso = predict(lasso.mod, s = bestlam.lasso, newx = xtest)
+  lasso.err[i,1] = mean((pred.lasso-ytest)^2) #0.0117569
+}
+boxplot(cbind(ridge.err,lasso.err),names = c("Ridge","Lasso"), main = "MSE Boxplot vs Ridge & Lasso", col = "lightgrey")
+
+```
+
+PCR:
+```{r}
+library(pls)
+set.seed(1)
+pcr.fit = pcr(Mapk1~., data = kidney[train,],scale = TRUE, validation = "CV")
+validationplot(pcr.fit, val.type = "MSEP")
+```
+
+As we can see in the plot, when M = 4 yield smallest MSEP
+So we compute MSE as follow:
+```{r}
+pcr.pred = predict(pcr.fit, kidney[test,], nncomp = 4)
+mean((pcr.pred[1]-ytest)^2) 
+```
+
+
+PLS
+```{r}
+set.seed(1)
+pls.fit = plsr(Mapk1~., data = kidney[train,], scale = TRUE, validation = "CV")
+validationplot(pls.fit,val.type = "MSEP")
+
+pls.pred = predict(pls.fit, kidney[test,], ncomp = 1)
+mean((pls.pred-kidney[test,]$Mapk1)^2)
+```
+
+for loop with multiple seeds dimension reduction:
+```{r}
+pcr.err = matrix(0, nrow = 50, ncol = 1)
+pls.err = matrix(0, nrow = 50, ncol = 1)
+for(i in 1:50){
+  set.seed(i)
+  train = sample(1:40, 30)
+  test = (-train)
+  pcr.fit = pcr(Mapk1~., data = kidney[train,],scale = TRUE, validation = "CV")
+  pcr.pred = predict(pcr.fit, kidney[test,], ncomp = 4)
+  pcr.err[i,1]=mean((pcr.pred[1]-ytest)^2) 
+  
+  pls.fit = plsr(Mapk1~., data = kidney[train,], scale = TRUE, validation = "CV")
+  pls.pred = predict(pls.fit, kidney[test,], ncomp = 1)
+  pls.err[i,1]=mean((pls.pred-kidney[test,]$Mapk1)^2)
+  
+}
+
+boxplot(cbind(pcr.err, pls.err))
+```
+
+
+
+Random Forest:
+```{r}
+library (randomForest)
+set.seed (1)
+bag.kidney = randomForest(Mapk1 ~. ,data=kidney ,subset =train, mtry=23, importance =TRUE)
+bag.kidney
+
+## Bagging
+yhat.bag = predict (bag.kidney ,newdata =kidney[test,])
+plot(yhat.bag, kidney[test,]$Mapk1)
+abline (0,1)
+mean((yhat.bag - kidney[test,]$Mapk1)^2)
+importance(bag.kidney)
+varImpPlot(bag.kidney)
+```
+
+```{r}
+bag.kidney =randomForest(Mapk1 ~., data=kidney, subset =train,mtry=8, importance = TRUE)
+yhat.bag = predict(bag.kidney,newdata =kidney[test,])
+mean((yhat.bag-kidney[test,]$Mapk1)^2)
+```
+
+```{r}
+fit.best = lm(Mapk1~Akt2+Rik+Sphk2+Pik3r1+Rac1, data = kidney[train,])
+# check the model violation. 
+plot(fit.best$residuals, ylab = "residuals",xlab = "observation",main = "residual distribution")
+# check correlation between the predictors:
+pairs(kidney[,c("Mapk1","Akt2","Rik","Sphk2","Pik3r1","Rac1")])
+
+```
+
